@@ -1,7 +1,7 @@
 ---
-name: Shirley Amika
+name: Amika
 info:
-    alias: Sherry, Amika, Zixue
-    location: Nanning, Guangxi
+    alias: Ami, Amika, Amibaka, Amiable
+    location: Nanjing, Jiangsu
     
 ---

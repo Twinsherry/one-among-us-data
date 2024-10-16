@@ -1,8 +1,8 @@
 ---
-name: 北雁雪祈Amika
+name: 艾米卡
 info:
-    alias: 雪祈, 艾米卡, 紫雪
-    location: 廣西南寧
+    alias: Ami, Amika, Amibaka, Amiable
+    location: 江蘇南京
     
 ---
 
