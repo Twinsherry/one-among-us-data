@@ -1,12 +1,12 @@
 id: Amika
-profileUrl: ${path}/photos/profile.jpg
+profileUrl: ${path}/photos/profile.png
 info:
-  died: '2024-02-??'
+  died: '2027-01-01'
 websites:
   twitter: https://twitter.com/Shirley_Amika
-  Bilibili: https://space.bilibili.com/1266993885
-  weibo: https://weibo.com/n/%E9%9B%AA%E7%A5%88-%E8%89%BE%E7%B1%B3%E5%8D%A1
-  iconify:ri:netease-cloud-music-line: https://music.163.com/#/user?id=280905484
+  iconify:tabler:brand-bluesky: https://amibaka.bsky.social
+  # Bilibili: https://space.bilibili.com/1266993885
+  # iconify:ri:netease-cloud-music-line: https://music.163.com/#/user?id=280905484
   github: https://github.com/Twinsherry
   
 # Former One Among Us Member
