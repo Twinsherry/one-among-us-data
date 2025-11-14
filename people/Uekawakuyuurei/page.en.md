@@ -2,6 +2,7 @@
 name: uekawakuyuurei
 info:
     alias: Ying (Hotaru), Qiu Yun (Akigumo)
+desc: To the other side of the sea on their favourite ship.
 ---
 
 ## Description
@@ -9,7 +10,7 @@ info:
 [According to Ying](https://twitter.com/Uekawakuyuurei/status/1416208961339019267), they are “Just an unhealthy boy in real life.”.
 However, when they are thought to be a girl online, they would not talk about their gender.
 Although they felt guilty while doing so,
-we always believe Ying to be the most kind-hearted and most lovely girl or boy.
+we always believe Ying to be the most kindhearted and most lovely girl or boy.
 
 Ying is an enthusiast about ships and they like to draw them.
 Under their brushes, those ships are no more weapons for warfare and destruction, but vehicles carrying the power of peace.
@@ -25,14 +26,14 @@ making every work they had done free to download and enjoy.
 Here's a selected few of her drawings:
 
 <PhotoScroll photos={[
-    '${path}/photos/IMG_1308.JPG', 
-    '${path}/photos/img002.jpg', 
-    '${path}/photos/img051.jpg', 
-    '${path}/photos/img197.jpg', 
-    '${path}/photos/img231.jpg', 
-    '${path}/photos/img252.jpg', 
-    '${path}/photos/img253.jpg', 
-    '${path}/photos/img370.jpg', 
+    '${path}/photos/IMG_1308.webp', 
+    '${path}/photos/img002.webp', 
+    '${path}/photos/img051.webp', 
+    '${path}/photos/img197.webp', 
+    '${path}/photos/img231.webp', 
+    '${path}/photos/img252.webp', 
+    '${path}/photos/img253.webp', 
+    '${path}/photos/img370.webp', 
 ]} />
 
 But this world is just that unfair.

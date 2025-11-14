@@ -2,9 +2,9 @@
 
 这里存了 [One Among Us](https://one-among.us/) 的条目，欢迎贡献！
 
-在贡献之前请阅读我们的 [文档和贡献指南](https://github.com/one-among-us/how-we-work/blob/main/README-zh_Hans.md)。
+在贡献之前请阅读我们的 [文档和贡献指南](https://oneamongus.ca/zh-Hans/docs/memorial)。
 
-Please read our [How-We-Work](https://github.com/one-among-us/how-we-work/blob/main/README.md) before contributing.
+Please read our [How-We-Work](https://oneamongus.ca/docs/memorial) before contributing.
 
 ## GitHub Repo 结构
 
@@ -12,10 +12,10 @@ Please read our [How-We-Work](https://github.com/one-among-us/how-we-work/blob/m
 * [web](https://github.com/one-among-us/web) - 网页前端源码
 * [backend](https://github.com/one-among-us/backend) - 献花和编辑后端源码
 
-## 文件结构
+## File Structure
 
 * Directory `/people/<userid>/`: Data for a specific person
-  * `info.json5`: Profile information
+  * `info.yml`: Profile information
   * `page.md`: Profile page content
   * `photos`: Photo directory
   * `comments`: List of comments made by other users in the format of `yyyy-mm-dd-{name}-{id}.txt`
@@ -25,9 +25,9 @@ Please read our [How-We-Work](https://github.com/one-among-us/how-we-work/blob/m
   * Directory `/people/<userid>/`: Built data for a specific person
     * `page.js`: `page.md` built with MDX
 
-## 多语言
+## Multilingual
 
-我们正在尝试重新编写网站的多语言架构，以使其更通用，更新的方式更简洁。在这段过渡时期里，请大家尽量把简体中文作为底稿，并且用自动转换或者手动校对的方式生成繁体文稿。在新的多语言架构编写完成后，我们会重新校对所有繁体文稿。
+We are trying to rewrite the multilingual architecture of the website to make it more versatile and more concise in an updated way. During this transitional period, please try your best to use Simplified Chinese as the manuscript, and use automatic conversion or manual proofreading to generate the Traditional Chinese manuscript. After the new multilingual architecture is written, we will re-proofread all Traditional Chinese manuscripts.
 
 <!--
 ## 生成/更新繁体文稿
@@ -38,3 +38,56 @@ Please read our [How-We-Work](https://github.com/one-among-us/how-we-work/blob/m
 
 这个脚本不会覆盖在已有的繁体文件上的更改，更新已经生成过繁体的简体文稿之后会自动合并，不过还是要手动检查一下哦。
 -->
+
+## HData
+
+`/data/hdata.json` defines metadata for controlling entry behavior and display properties. Here is a description of each field:
+
+* `commentOnly`: `string[]`, entries that contain only comments without full profile pages (e.g., `tdor` or `tdov`)
+* `exclude`: `string[]`, directories that will be excluded from the build process entirely
+* `notShowOnHome`: `string[]`, entries that exist but are hidden from the home page listing
+* `actualHide`: `string[]`, entries completely hidden from both home page and random navigation.  
+  Note: If an entry is in this list, you don't need to add it to `notShowOnHome` again.
+* `trigger`: `string[]`, entries with potentially triggering content that require content warnings and user confirmation before viewing
+* `switch`: `[string, string][]`, paired entries for profile switching functionality. Each pair `[A, B]` allows switching from profile A to profile B.
+* `skipAges`: `string[]`, entries where age calculation should be skipped
+* `probabilities`: `object`, probability weights for displaying entries on the home page. Format: `{"entry_id": probability_value}`. Values between 0.0-1.0 control random display chance. Entries not in this object are always shown.
+* `groups`: `string[][]`, groups of entries that should be displayed together when sorted. Each group is an array of entry IDs. Members within a group are sorted by their sortKey, and groups are positioned based on the latest sortKey among their members.
+
+### Example
+
+```json
+{
+    "commentOnly": [
+        "tdor"
+    ],
+    "exclude": [
+        "tdov"
+    ],
+    "notShowOnHome": [
+        "Anilovr",
+        "noname3031"
+    ],
+    "actualHide": [
+        "ArtsEpiphany"
+    ],
+    "trigger": [
+        "Xu_Yushu"
+    ],
+    "switch": [
+        ["profile_a", "profile_b"]
+    ],
+    "skipAges": [
+        "example_entry"
+    ],
+    "probabilities": {
+        "XingZ60": 1,
+        "Huasheng": 0.5
+    },
+    "groups": [
+        ["Elihuso", "Anilovr"]
+    ]
+}
+```
+
+If you don’t understand how to modify it, please feel free to [Contact Us](https://one-among.us/about/).
