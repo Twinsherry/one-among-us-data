@@ -10,5 +10,5 @@ desc: Just a laid-back qcm-chan
 
 To-do
 
-Contributors for this entry: Anonymous
+Contributors for this entry: Anonymous, Maho Citrus
 <!-- The authors of this entry need to hide their names in code. -->
