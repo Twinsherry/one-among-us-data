@@ -1,6 +1,7 @@
 import url from "url";
 import path from "path";
 import fs from "fs-extra";
+import { execSync } from "child_process";
 import autocorrect from "autocorrect-node";
 
 import YAML from 'js-yaml';
@@ -8,9 +9,11 @@ import metadataParser from 'markdown-yaml-metadata-parser';
 
 import { renderMdx } from "./mdx.js";
 import moment from "moment";
+import { Solar, Lunar } from "lunar-typescript";
 import { handleFeatures } from "./feature.js";
 import { HData, PeopleMeta } from "./data.js";
 import { encodeBlur } from "./blurhash.js";
+import { initCache, hasFileChanged, getCachedResult, setCachedResult, saveCache, getCacheStats, updateFileCache, haveFilesChanged } from "./cache.js";
 
 const PUBLIC_DIR = "public";
 
@@ -23,11 +26,15 @@ const DATA_DIR = "data";
 
 const projectRoot = path.dirname(path.dirname(url.fileURLToPath(import.meta.url)));
 const peopleDir = path.join(projectRoot, PEOPLE_DIR);
-const people = fs.readdirSync(peopleDir).map(person => ({
-  dirname: person,
-  srcPath: path.join(peopleDir, person),
-  distPath: path.join(projectRoot, DIST_DIR, PEOPLE_DIR, person)
-}));
+const people = fs.readdirSync(peopleDir)
+  .filter(person => !person.startsWith('.') && fs.statSync(path.join(peopleDir, person)).isDirectory())
+  .map(person => ({
+    dirname: person,
+    srcPath: path.join(peopleDir, person),
+    distPath: path.join(projectRoot, DIST_DIR, PEOPLE_DIR, person)
+  }));
+
+initCache(projectRoot);
 
 const hdata = JSON.parse(fs.readFileSync(path.join(projectRoot, DATA_DIR, "hdata.json")).toString()) as HData;
 const commentOnlyList = hdata.commentOnly;
@@ -42,6 +49,8 @@ const groups = hdata.groups;
 
 async function buildBlurCode() {
   const blurCode = {};
+  let numCached = 0;
+  let numGenerated = 0;
 
   for (const {dirname, srcPath, distPath} of people) {
     if (excludeList.includes(dirname)) continue;
@@ -50,10 +59,27 @@ async function buildBlurCode() {
     const info: any = YAML.load(fs.readFileSync(path.join(srcPath, `info.yml`), 'utf-8'))
     if (typeof(info.profileUrl) != 'string') continue;
     const photoPath = path.join(srcPath, (info.profileUrl as string).replaceAll('${path}/', ''))
+
+    // Check cache using photo path as key
+    const cacheKey = `blur:${dirname}`;
+    if (!hasFileChanged(photoPath)) {
+      const cachedBlur = getCachedResult(cacheKey);
+      if (cachedBlur) {
+        blurCode[dirname] = cachedBlur;
+        numCached++;
+        continue;
+      }
+    }
+
+    // Generate new blur hash
     blurCode[dirname] = await encodeBlur(photoPath);
+    setCachedResult(cacheKey, blurCode[dirname]);
+    updateFileCache(photoPath);
+    numGenerated++;
     console.log(`Blur code of ${dirname} has generated`)
   }
 
+  console.log(`[Cache] Blur codes: ${numCached} cached, ${numGenerated} generated`);
   fs.ensureDirSync(path.join(projectRoot, DIST_DIR));
   fs.writeFileSync(path.join(projectRoot, DIST_DIR, 'blur-code.json'), JSON.stringify(blurCode))
 }
@@ -70,7 +96,7 @@ function buildPeopleInfoAndList() {
     // Compiled meta of list of people for the front page (contains keys id, name, profileUrl)
     const peopleList: PeopleMeta[] = [];
     const peopleHomeList: PeopleMeta[] = [];
-    const birthdayList = [] as [string, string][]
+    const birthdayList = [] as ([string, string] | [string, string, string])[]
     const departureList = [] as [string, string][]
 
     // For each person
@@ -98,19 +124,95 @@ function buildPeopleInfoAndList() {
       // Add age
       if (info.info && info.info.died && info.info.born && (!skipAges.includes(dirname)))
       {
-        try { info.info.age = Math.abs(moment(info.info.died).diff(info.info.born, 'years', false)) }
-        catch (e) { console.log(`Unable to calculate age for ${dirname}`) }
+        if (info.info.born.startsWith('0000')) {
+          // Skip age calculation for unknown year
+        } else {
+          try { info.info.age = Math.abs(moment(info.info.died).diff(info.info.born, 'years', false)) }
+          catch (e) { console.log(`Unable to calculate age for ${dirname}`) }
+        }
+      }
+
+      // Determine lunar birthday month-day for birthday-list.json
+      let lunarMd: string | null = null
+      if (info.info && info.info.born && info.info.lunar_birthday) {
+        const bornStr = info.info.born as string
+        if (bornStr.startsWith('0000-')) {
+          // Unknown year: treat month-day directly as lunar month-day
+          const match = bornStr.match(/^0000-(-?\d+)-(\d+)$/)
+          if (!match) {
+            throw new Error(`[Build Error] Invalid lunar born format for "${dirname}": ${bornStr}. Expected format like 0000-04-15 or 0000--4-15 (leap month).`)
+          }
+          // Handle negative month for lunar leap month
+          lunarMd = String(Math.abs(parseInt(match[1], 10))).padStart(2, '0') + '-' + match[2].padStart(2, '0')
+        } else {
+          // Known year: convert solar born date to lunar
+          const parts = bornStr.split('-').map(Number)
+          const solar = Solar.fromYmd(parts[0], parts[1], parts[2])
+          const lunar = solar.getLunar()
+          lunarMd = String(Math.abs(lunar.getMonth())).padStart(2, '0') + '-' + String(lunar.getDay()).padStart(2, '0')
+        }
       }
 
       if (info.id && info.info && info.info.born) {
         if (!actualHide.includes(info.id)) {
-          birthdayList.push([info.id, info.info.born])
+          birthdayList.push(lunarMd ? [info.id, info.info.born, lunarMd] : [info.id, info.info.born])
         }
       }
 
       if (info.id && info.info && info.info.died) {
         if (!actualHide.includes(info.id)) {
           departureList.push([info.id, info.info.died])
+        }
+      }
+
+      // Handle lunar birthday display and solarBorn field
+      const isLunarBirthday = info.info && info.info.lunar_birthday
+      if (isLunarBirthday && info.info.born && typeof info.info.born === 'string') {
+        const bornStr = info.info.born as string
+        if (bornStr.startsWith('0000-')) {
+          // Unknown year + lunar: format month-day as Chinese lunar
+          const match = bornStr.match(/^0000-(-?\d+)-(\d+)$/)
+          if (!match) {
+            throw new Error(`[Build Error] Invalid lunar born format for "${dirname}": ${bornStr}. Expected format like 0000-04-15 or 0000--4-15 (leap month).`)
+          }
+          const mm = parseInt(match[1], 10)
+          const dd = parseInt(match[2], 10)
+
+          const absMm = Math.abs(mm)
+          const leapPrefix = mm < 0 ? '闰' : ''
+
+          // Use a reference year to get the Chinese text for month/day
+          const refLunar = Lunar.fromYmd(2000, absMm, dd)
+          if (lang === '' || lang === '.zh_hant') {
+            info.info.born = leapPrefix + refLunar.getMonthInChinese() + '月' + refLunar.getDayInChinese()
+          } else {
+            info.info.born = String(absMm).padStart(2, '0') + '-' + match[2].padStart(2, '0') + ' (Lunar)'
+          }
+        } else {
+          // Known year + lunar: convert to lunar display, store solar in solarBorn
+          const parts = bornStr.split('-').map(Number)
+          const solar = Solar.fromYmd(parts[0], parts[1], parts[2])
+          const lunar = solar.getLunar()
+          info.solarBorn = bornStr
+          if (lang === '' || lang === '.zh_hant') {
+            info.info.born = lunar.getYear() + '年' + lunar.getMonthInChinese() + '月' + lunar.getDayInChinese()
+          } else {
+            info.info.born = lunar.getYear() + '-' + String(Math.abs(lunar.getMonth())).padStart(2, '0') + '-' + String(lunar.getDay()).padStart(2, '0') + ' (Lunar)'
+          }
+        }
+        // Remove the lunar_birthday flag from output (internal use only)
+        delete info.info.lunar_birthday
+      } else {
+        // Remove lunar_birthday flag even if born is missing
+        if (info.info) delete info.info.lunar_birthday
+        // Format born date if year is unknown (original logic)
+        if (info.info && info.info.born && typeof info.info.born === 'string' && info.info.born.startsWith('0000-')) {
+          const date = moment(info.info.born);
+          if (lang === '' || lang === '.zh_hant') {
+            info.info.born = date.format('M月D日');
+          } else {
+            info.info.born = date.format('MMM D');
+          }
         }
       }
 
@@ -123,6 +225,16 @@ function buildPeopleInfoAndList() {
       if (langKey == '') langKey = "zh_hans"
       const keys = infoKeys[langKey]['key']
       info.info = info.info.map(pair => [pair[0] in keys ? keys[pair[0]] : pair[0], pair[1]])
+
+      // Store localized born key so web can identify the born entry without duplication
+      if (info.solarBorn && keys['born']) {
+        info.bornKey = keys['born']
+      }
+
+      // Add desc from markdown metadata
+      if (mdMeta.desc !== undefined) {
+        info.desc = mdMeta.desc
+      }
 
       // Combine comments in people/${dirname}/comments/${cf}.json
       const commentPath = path.join(srcPath, COMMENTS_DIR)
@@ -175,6 +287,9 @@ function buildPeopleInfoAndList() {
 
 // Render `people/${dirname}/page.md` to `dist/people/${dirname}/page.js`.
 function buildPeoplePages() {
+  let numCached = 0;
+  let numGenerated = 0;
+
   for (const { dirname, srcPath, distPath } of people) {
 
     if (excludeList.includes(dirname)) continue;
@@ -182,8 +297,23 @@ function buildPeoplePages() {
 
     for (const lang of ['', '.zh_hant', '.en'])
     {
+      const mdPath = path.join(srcPath, `page${lang}.md`);
+      const infoPath = path.join(srcPath, `info.yml`);
+      const cacheKey = `mdx:${dirname}${lang}`;
+
+      // Check cache - both page.md and info.yml must be unchanged
+      if (!haveFilesChanged([mdPath, infoPath])) {
+        const cachedResult = getCachedResult(cacheKey);
+        if (cachedResult) {
+          fs.ensureDirSync(distPath);
+          fs.writeFileSync(path.join(distPath, `page${lang}.json`), JSON.stringify(cachedResult));
+          numCached++;
+          continue;
+        }
+      }
+
       // Read markdown page and remove markdown meta
-      let markdown = metadataParser(fs.readFileSync(path.join(srcPath, `page${lang}.md`), "utf-8")).content.replaceAll("<!--", "{/* ").replaceAll("-->", " */}");
+      let markdown = metadataParser(fs.readFileSync(mdPath, "utf-8")).content.replaceAll("<!--", "{/* ").replaceAll("-->", " */}");
 
       markdown = handleFeatures(markdown)
 
@@ -196,13 +326,21 @@ function buildPeoplePages() {
 
       fs.ensureDirSync(distPath);
       fs.writeFileSync(path.join(distPath, `page${lang}.json`), JSON.stringify(result));
+
+      // Update cache
+      setCachedResult(cacheKey, result);
+      updateFileCache(mdPath);
+      updateFileCache(infoPath);
+      numGenerated++;
     }
   }
+
+  console.log(`[Cache] MDX pages: ${numCached} cached, ${numGenerated} generated`);
 }
 
 // Copy `people/${dirname}/photos` to `dist/people/${dirname}/`.
 function copyPeopleAssets() {
-  const PEOPLE_ASSETS = ["photos", "backup", "page.md"];
+  const PEOPLE_ASSETS = ["photos", "backup", "page.md", "page.zh_hant.md", "page.en.md"];
 
   for (const { srcPath, distPath } of people) {
     fs.ensureDirSync(distPath);
@@ -222,6 +360,7 @@ function copyPublic() {
   fs.copySync(path.join(projectRoot, DATA_DIR, 'eggs.json'), path.join(projectRoot, DIST_DIR, 'eggs.json'));
   fs.writeFileSync(path.join(DIST_DIR, 'trigger-list.json'), JSON.stringify(trigger as string[]));
   fs.writeFileSync(path.join(DIST_DIR, 'switch-pair.json'), JSON.stringify(switchPair as [string, string][]))
+  fs.writeFileSync(path.join(DIST_DIR, 'actual-hide-list.json'), JSON.stringify(actualHide as string[]))
   fs.writeFileSync(path.join(DIST_DIR, 'probabilities.json'), JSON.stringify(probabilities))
   fs.writeFileSync(path.join(DIST_DIR, 'groups.json'), JSON.stringify(groups as string[][]))
 }
@@ -246,12 +385,111 @@ function copyComments() {
   }
 }
 
-buildBlurCode();
-buildPeopleInfoAndList();
-buildPeoplePages();
-copyPeopleAssets();
-copyPublic();
-copyComments();
+function cleanDist() {
+  const distPeopleDir = path.join(projectRoot, DIST_DIR, PEOPLE_DIR);
+  if (!fs.existsSync(distPeopleDir)) return;
+
+  const distPeople = fs.readdirSync(distPeopleDir).filter(p => !p.startsWith('.'));
+  const srcPeopleMap = new Map(people.map(p => [p.dirname, p.srcPath]));
+
+  let numRemoved = 0;
+  for (const person of distPeople) {
+    const srcPath = srcPeopleMap.get(person);
+    if (!srcPath || isDirEmpty(srcPath)) {
+      fs.removeSync(path.join(distPeopleDir, person));
+      numRemoved++;
+    }
+  }
+  if (numRemoved > 0) {
+    console.log(`[Clean] Removed ${numRemoved} stale entries from dist/people`);
+  }
+}
+
+function buildPageDates() {
+  const pageDates: Record<string, { created: string; modified: string }> = {};
+
+  try {
+    // --first-parent strictly follows merge commits and direct commits on the main branch,
+    // ensuring 'created' reflects when the PR was merged into main (rather than initial branch commits).
+    const logOutput = execSync('git log --first-parent HEAD --name-only --format="COMMIT:%cI" -- people', {
+      cwd: projectRoot,
+      maxBuffer: 50 * 1024 * 1024,
+      encoding: "utf8"
+    });
+
+    let currentCommitUtc = "";
+    for (const line of logOutput.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (trimmed.startsWith("COMMIT:")) {
+        const rawDate = trimmed.slice(7);
+        const parsed = new Date(rawDate);
+        currentCommitUtc = !isNaN(parsed.getTime()) ? parsed.toISOString() : "";
+      } else if (trimmed.startsWith("people/")) {
+        const parts = trimmed.split("/");
+        if (parts.length >= 2) {
+          const person = parts[1];
+          // Exclude comments-only commits, tracking profile content updates
+          if (parts[2] !== "comments" && currentCommitUtc) {
+            if (!pageDates[person]) {
+              pageDates[person] = {
+                created: currentCommitUtc,
+                modified: currentCommitUtc,
+              };
+            } else {
+              pageDates[person].created = currentCommitUtc;
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[Build] Warning: Failed to extract git modification history:", e);
+  }
+
+  const sortedPageDates: Record<string, { created: string; modified: string }> = {};
+  for (const key of Object.keys(pageDates).sort((a, b) => a.localeCompare(b))) {
+    sortedPageDates[key] = {
+      created: pageDates[key].created,
+      modified: pageDates[key].modified,
+    };
+  }
+
+  fs.ensureDirSync(path.join(projectRoot, DIST_DIR));
+  fs.writeFileSync(
+    path.join(projectRoot, DIST_DIR, "page-dates.json"),
+    JSON.stringify(sortedPageDates, null, 2)
+  );
+  console.log(`[Build] Generated page-dates.json (${Object.keys(sortedPageDates).length} entries)`);
+}
+
+async function runBuildStep(stepName: string, fn: () => any | Promise<any>) {
+  try {
+    await fn();
+  } catch (err) {
+    console.error(`[Build] Error occurred in step "${stepName}":`, err);
+    process.exit(1);
+  }
+}
+
+async function main() {
+  const buildStart = Date.now();
+  await runBuildStep("cleanDist", () => cleanDist());
+  await runBuildStep("buildBlurCode", () => buildBlurCode());
+  await runBuildStep("buildPeopleInfoAndList", () => buildPeopleInfoAndList());
+  await runBuildStep("buildPeoplePages", () => buildPeoplePages());
+  await runBuildStep("copyPeopleAssets", () => copyPeopleAssets());
+  await runBuildStep("copyPublic", () => copyPublic());
+  await runBuildStep("copyComments", () => copyComments());
+  await runBuildStep("buildPageDates", () => buildPageDates());
+  saveCache();
+  const buildTime = ((Date.now() - buildStart) / 1000).toFixed(2);
+  const stats = getCacheStats();
+  console.log(`[Build] Completed in ${buildTime}s`);
+  console.log(`[Cache] ${stats.totalFiles} files tracked, ${stats.totalResults} results cached`);
+}
+
+main();
 
 /**
  * Trim a specific char from a string
@@ -273,7 +511,9 @@ function trim(str: string, ch: string) {
 }
 
 function isDirEmpty(dir: string): boolean {
-  if (fs.readdirSync(dir).length == 0) return true;
-  else if ((fs.readdirSync(dir).length == 1) && (fs.readdirSync(dir)[0] == 'comments')) return true;
+  if (!fs.existsSync(dir)) return true;
+  const files = fs.readdirSync(dir).filter(f => !f.startsWith('.'));
+  if (files.length === 0) return true;
+  else if ((files.length === 1) && (files[0] === 'comments')) return true;
   return false;
 }
